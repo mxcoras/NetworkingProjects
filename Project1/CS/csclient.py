@@ -28,11 +28,11 @@ def setup(serverIP, serverPort):
 def send_filename(filename):
     global clientSocket
     body = struct.pack("!s", filename.encode())
-    bodySize = len(body)
+    bodySize = len(body) + 5
     statCode = b'A'
-    header = struct.pack("!cI", statCode, bodySize)
+    package = struct.pack("!cIs", statCode, bodySize, filename)
     try:
-        clientSocket.send(header + body)
+        clientSocket.send(package)
         return clientSocket.recv(1024)
     except:
         print("Failed to send filename.")
@@ -43,7 +43,7 @@ def send_ok():
     try:
         clientSocket.send(struct.pack("!cI", b'A', 5))
     except:
-        print("Send OK package failed, please try again.")
+        print("Send ACK package failed, please try again.")
 
 
 def send_cancel():
@@ -56,9 +56,17 @@ def send_cancel():
 
 def recv_file(filename):
     global clientSocket
-    firstData = clientSocket.recv(1024)
-    # 待完善
-    pass
+    data = clientSocket.recv(1024)
+    check_error(data[:5])
+    if struct.unpack(data[0]) != 'S':
+        print("Something's wrong...")
+        exit(1)
+    with open(filename, 'wb') as f:
+        while len(data) > 0:
+            data = clientSocket.recv(10240)
+            if struct.unpack(data[0]) == 'T':
+                break
+            f.write(data)
 
 
 def check_error(header):

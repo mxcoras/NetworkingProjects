@@ -17,7 +17,7 @@ def setup(serverIP, serverPort):
     except:
         print("Connection failed, please try again.")
         return
-    if struct.unpack(message[:5]) == (b'Y',5):
+    if struct.unpack("!cI", message[:5]) == (b'Y', 5):
         print(f"Successfuly connect to {serverIP}:{serverPort}.")
     else:
         print("Failed to confirm connect.")
@@ -27,10 +27,10 @@ def setup(serverIP, serverPort):
 
 def send_filename(filename):
     global clientSocket
-    body = struct.pack("!s", filename.encode())
+    body = filename.encode()
     bodySize = len(body) + 5
     statCode = b'D'
-    package = struct.pack("!cIs", statCode, bodySize, filename)
+    package = struct.pack("!cI", statCode, bodySize) + body
     try:
         clientSocket.send(package)
         return clientSocket.recv(1024)
@@ -58,22 +58,23 @@ def recv_file(filename):
     global clientSocket
     data = clientSocket.recv(1024)
     check_error(data[:5])
-    if struct.unpack(data[:5])[0] != b'S':
+    if struct.unpack("!cI", data[:5])[0] != b'S':
         print("Something's wrong...")
         exit(1)
     print("Start downloading...")
     with open(filename, 'wb') as f:
-        while len(data) > 0:
-            data = clientSocket.recv(10240)
-            if struct.unpack(data[:5])[0] == b'T':
+        data = clientSocket.recv(10240)
+        while len(data) > 5:
+            if struct.unpack("!cI", data[:5])[0] == b'T':
                 break
-            f.write(data)
+            f.write(data[5:])
+            data = clientSocket.recv(10240)
     print("Successfully downloaded.")
 
 
 def check_error(header):
     global clientSocket
-    if struct.unpack(header) == (b'E', 5):
+    if struct.unpack("!cI", header) == (b'E', 5):
         print("Server error, closing...")
         clientSocket.close()
         exit(1)
@@ -89,7 +90,7 @@ while True:
         break
     fileStat = send_filename(filename)
     check_error(fileStat[:5])
-    if struct.unpack(fileStat[:5]) == (b'Y', 5):
+    if struct.unpack("!cI", fileStat[:5]) == (b'Y', 5):
         print("File exists. Do you want to download it?")
         op = input("Input 'Y' or 'y' to continue, or other charactors to cancel:")
         if op not in ('Y', 'y'):
@@ -99,7 +100,7 @@ while True:
             send_ok()
             print('Start downloading...')
             recv_file(filename)
-    elif struct.unpack(fileStat[:5]) == (b'N', 5):
+    elif struct.unpack("!cI", fileStat[:5]) == (b'N', 5):
         print("File doesn't exist.")
 
 print("Closing...")

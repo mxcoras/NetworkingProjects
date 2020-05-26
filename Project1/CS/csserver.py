@@ -27,6 +27,7 @@ def send_no():
 
 def send_file(filename):
     global serverSocket
+    serverSocket.send(struct.pack("!cI", b'S', 5))
     with open(filename, 'rb') as f:
         while True:
             body = f.read(10235)
@@ -36,12 +37,13 @@ def send_file(filename):
             bodySize = len(body) + 5
             package = struct.pack("!cI", b'I', bodySize) + body
             serverSocket.send(package)
+            time.sleep(0.5)
 
 
 def recv_data() -> tuple:
     global serverSocket
     recvBytes = serverSocket.recv(1024)
-    header = struct.unpack(recvBytes[:5])
+    header = struct.unpack("!cI", recvBytes[:5])
     body = recvBytes[5:].decode()
     return (header, body)
 
@@ -49,9 +51,11 @@ def recv_data() -> tuple:
 serverSocket.bind(('', serverPort))
 serverSocket.listen(1)
 print("The server is ready to receive.")
+serverSocket, addr = serverSocket.accept()
 
 while True:
-    serverSocket, addr = serverSocket.accept()
+    package = recv_data()
+    send_yes()
     package = recv_data()
     header = package[0]
     filename = package[1]
@@ -67,5 +71,5 @@ while True:
         if recv_data()[0][0] == b'C':
             continue
         send_file(filename)
-    
+
 serverSocket.close()

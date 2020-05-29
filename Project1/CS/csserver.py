@@ -37,7 +37,8 @@ def send_file(filename):
             bodySize = len(body) + 5
             package = struct.pack("!cI", b'I', bodySize) + body
             serverSocket.send(package)
-            time.sleep(0.5)
+            recv_data()
+    print(f"Successfully sended.")
 
 
 def recv_data() -> tuple:
@@ -48,28 +49,46 @@ def recv_data() -> tuple:
     return (header, body)
 
 
-serverSocket.bind(('', serverPort))
-serverSocket.listen(1)
-print("The server is ready to receive.")
-serverSocket, addr = serverSocket.accept()
-
-while True:
+def __main__():
+    global serverSocket
+    serverSocket = socket(AF_INET, SOCK_STREAM)
+    serverSocket.bind(('', serverPort))
+    serverSocket.listen(1)
+    print("The server is ready to receive.")
+    serverSocket, addr = serverSocket.accept()
     package = recv_data()
     send_yes()
-    package = recv_data()
-    header = package[0]
-    filename = package[1]
-    if header[0] == b'B':
-        break
-    elif header[0] == b'D':
-        try:
-            open(filename, 'rb')
-        except IOError:
-            send_no()
-            continue
-        send_yes()
-        if recv_data()[0][0] == b'C':
-            continue
-        send_file(filename)
+    print(f"Connection from {addr[0]}, port {addr[1]}.")
+    while True:
+        package = recv_data()
+        header = package[0]
+        filename = package[1]
+        if header[0] == b'S':
+            send_yes()
+            serverSocket.close()
+            print(f"{addr[0]}, port {addr[1]} closed, program shutdown.")
+            return False
+        elif header[0] == b'B':
+            send_yes()
+            serverSocket.close()
+            print(f"{addr} Closed.")
+            break
+        elif header[0] == b'D':
+            try:
+                open(filename, 'rb')
+            except IOError:
+                send_no()
+                continue
+            send_yes()
+            if recv_data()[0][0] == b'C':
+                continue
+            print(f"Sending file: {filename}")
+            send_file(filename)
+    return True
 
-serverSocket.close()
+
+if __name__ == "__main__":
+    flag = True
+    while flag:
+        flag = __main__()
+    serverSocket.close()

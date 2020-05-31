@@ -47,12 +47,36 @@ def recv_data(newSocket) -> tuple:
     return (header, body)
 
 
+def start_chat():
+    chatSocket = socket(AF_INET, SOCK_DGRAM)
+    chatSocket.bind(('', serverPort))
+    while True:
+        try:
+            package, fromAddr = chatSocket.recvfrom(2048)
+        except:
+            print("[Warning]: Chat socket closed.")
+            continue
+        recvHeader = struct.unpack("!II", package[:8])
+        recvBody = package[8:]
+        fromip = ntohl(struct.unpack("I", inet_aton(fromAddr[0]))[0])
+        toip = inet_ntoa(struct.pack('I', htonl(recvHeader[0])))
+        toport = recvHeader[1]
+        sendHeader = struct.pack("!II", fromip, fromAddr[1])
+        print(toip, toport)
+        print(fromAddr[0], fromAddr[1])
+        chatSocket.sendto(sendHeader + recvBody, (toip, toport))
+
+
 def tcp_connect(newSocket, addr):
     package = recv_data(newSocket)
     send_yes(newSocket)
     print(f"Connection from {addr[0]}, port {addr[1]}.")
     while True:
-        package = recv_data(newSocket)
+        try:
+            package = recv_data(newSocket)
+        except:
+            print(f"Connection from {addr[0]}, port {addr[1]} closed.")
+            exit(0)
         header = package[0]
         filename = package[1]
         if header[0] == b'S':
@@ -67,6 +91,8 @@ def tcp_connect(newSocket, addr):
             newSocket.close()
             print(f"{addr[0]}, port {addr[1]} closed.")
             break
+        #elif header[0] == b'G':
+        #    start_chat()
         elif header[0] == b'D':
             try:
                 open(filename, 'rb')
@@ -83,12 +109,16 @@ def tcp_connect(newSocket, addr):
 
 def __main__():
     print("The server is ready to receive.")
+    msgt = threading.Thread(target=start_chat)
+    msgt.setDaemon(True)
+    msgt.start()
     while True:
         try:
             newSocket, addr = serverSocket.accept()
         except OSError:
             exit(0)
-        t = threading.Thread(target=tcp_connect, args=(newSocket, addr), name="main")
+        t = threading.Thread(target=tcp_connect, args=(newSocket, addr))
+        t.setDaemon(True)
         t.start()
 
 

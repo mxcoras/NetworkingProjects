@@ -2,10 +2,13 @@
 
 from socket import *
 import struct
+import threading
 
 
 clientSocket = socket(AF_INET, SOCK_STREAM)
 clientSocket.settimeout(60)
+chatSocket = socket(AF_INET, SOCK_DGRAM)
+chatSocket.bind(('', 12001))
 
 
 def setup(serverIP, serverPort):
@@ -91,6 +94,40 @@ def recv_file(filename):
     print("Successfully downloaded.")
 
 
+def start_chat(serverAddr):
+    global chatSocket
+    t = threading.Thread(target=recv_msg)
+    t.setDaemon(True)
+    t.start()
+    toip = str(input("Please input target IP: "))
+    toip = ntohl(struct.unpack("I", inet_aton(toip))[0])
+    toport = int(input("Please input target port: "))
+    msgHeader = struct.pack("!II", toip, toport)
+    while True:
+        msg = str(input("Please input message, or '!q' to exit: \n"))
+        if msg == '!q':
+            return
+        msgBody = msg.encode()
+        chatSocket.sendto(msgHeader + msgBody, serverAddr)
+        print(f"Sended to {serverAddr[0]}:{serverAddr[1]}")
+
+
+def recv_msg():
+    global chatSocket
+    while True:
+        try:
+            package, serverAddr = chatSocket.recvfrom(2048)
+        except:
+            print("[Warning]: Chat socket closed.")
+            return
+        addrInfo = struct.unpack("!II", package[:8])
+        fromip = inet_ntoa(struct.pack('I', htonl(addrInfo[0])))
+        fromport = addrInfo[1]
+        msgBody = package[8:].decode()
+        print(
+            f"\nMessage from {fromip}:{fromport}: \n{msgBody}\n\nPlease input message, or '!q' to exit: ")
+
+
 def check_error(header):
     global clientSocket
     if struct.unpack("!cI", header) == (b'E', 5):
@@ -106,7 +143,7 @@ def __main__():
     setup(serverIP, serverPort)
 
     while True:
-        filename = str(input("Please input file name, or 'q' to exit: "))
+        filename = str(input("Please input file name, \nor 'c' to start chat, 'q' to exit: \n"))
         if filename == 'q':
             print("Closing...")
             send_close()
@@ -119,6 +156,9 @@ def __main__():
             clientSocket.recv(1024)
             clientSocket.close()
             break
+        elif filename == 'c':
+            start_chat((serverIP, serverPort))
+            continue
         fileStat = send_filename(filename)
         check_error(fileStat[:5])
         if struct.unpack("!cI", fileStat[:5]) == (b'Y', 5):

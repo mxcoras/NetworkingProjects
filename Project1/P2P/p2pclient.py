@@ -4,12 +4,12 @@ from socket import *
 import struct
 import threading
 import json
-
+from random import randint
 
 clientSocket = socket(AF_INET, SOCK_STREAM)
 clientSocket.settimeout(60)
-fileSocket = socket(AF_INET, SOCK_DGRAM)
-fileSocket.bind(('', 12000))
+seedSocket = socket(AF_INET, SOCK_DGRAM)
+seedSocket.bind(('', 12000))
 chatSocket = socket(AF_INET, SOCK_DGRAM)
 chatSocket.bind(('', 12001))
 
@@ -72,7 +72,8 @@ def update_file(filename, addr):
     except IOError:
         print("No such file.")
         return
-    filesize = len(f)
+    data = f.read()
+    filesize = len(data)
     body = str((filename, filesize)).encode()
     bodySize = len(body) + 5
     statCode = b'D'
@@ -141,6 +142,72 @@ def get_peers(addr):
         print(peer)
 
 
+def start_seed():
+    while True:
+        try:
+            package, peerAddr = seedSocket.recvfrom(2048)
+            header = struct.unpack("!cII", package[:9])
+            if check_header(header[0], b'G'):
+                body = package[9:].decode()
+                send_file(peerAddr, body, header[1])
+        except:
+            print("[Warning]: Seed socket closed.")
+            return
+
+
+def send_file(peerAddr, filename, part):
+    try:
+        open(filename, 'rb')
+    except IOError:
+        seedSocket.sendto(struct.pack("!cII", b'E', 0, 9), peerAddr)
+        return
+    with open(filename, 'rb') as f:
+        data = f.read()
+        size = len(data)
+        bodybytes = b''
+        f.seek(0)
+        if part == 0:
+            bodybytes = f.read()
+        elif part == 1:
+            bodybytes = f.read(int(size/2))
+        elif part == 2:
+            f.read(int(size/2))
+            bodybytes = f.read()
+    seedSocket.sendto(struct.pack("!cII", b'S', 0, 9), peerAddr)
+    if not recv_ack(peerAddr, 0):
+        return
+    fix = randint(1, 1000)
+    with open('TEMP.'+str(fix), 'wb+') as sf:
+        sf.write(bodybytes)
+        sf.seek(0)
+        packnum = 1
+        while True:
+            body = sf.read(10231)
+            if not body:
+                seedSocket.sendto(struct.pack("!cII", b'T', 0, 9), peerAddr)
+                if not recv_ack(peerAddr, 0):
+                    print("[Warnig] Complete ACK not recieved.")
+                    return
+            bodySize = len(body) + 9
+            package = struct.pack("!cII", b'I', packnum, bodySize) + body
+            seedSocket.sendto(package, peerAddr)
+            if not recv_ack(peerAddr, packnum):
+                return
+
+
+def recv_ack(peerAddr, num):
+    try:
+        package, peerAddr = seedSocket.recvfrom(2048)
+        header = struct.unpack("!cII", package[:9])
+    except:
+        print(f"Peer {peerAddr[0]}:{peerAddr[1]} timeout.")
+        return False
+    if check_header(header[0], b'A') and header[1] == num:
+        return True
+    else:
+        return False
+
+
 def start_chat():
     t = threading.Thread(target=recv_msg)
     t.setDaemon(True)
@@ -174,14 +241,14 @@ def recv_msg():
 def conn_fail(addr):
     print(f"Connection failed with tracker {addr[0]}:{addr[1]}")
     clientSocket.close()
-    fileSocket.close()
+    seedSocket.close()
     chatSocket.close()
     exit(0)
 
 
 def conn_close(addr):
     clientSocket.close()
-    fileSocket.close()
+    seedSocket.close()
     chatSocket.close()
     print(f"Connection closed with tracker {addr[0]}:{addr[1]}")
     exit(0)
@@ -203,6 +270,9 @@ def __main__():
     serverPort = int(input("Please input tracker port: "))
     addr = (serverIP, serverPort)
     send_on(addr)
+    t = threading.Thread(target=start_seed)
+    t.setDaemon(True)
+    t.start()
     hint = "Please input command, use 'help' to get help info:"
     while True:
         print(hint)

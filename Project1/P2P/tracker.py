@@ -31,14 +31,14 @@ def send_yes(psocket, addr):
     try:
         psocket.send(struct.pack("!cI", b'Y', 5))
     except:
-        closed_by_peer(addr)
+        closed_by_peer(psocket, addr)
 
 
 def send_no(psocket, addr):
     try:
         psocket.send(struct.pack("!cI", b'N', 5))
     except:
-        closed_by_peer(addr)
+        closed_by_peer(psocket, addr)
 
 
 def recv_data(psocket) -> tuple:
@@ -67,25 +67,25 @@ def peer_off(psocket, addr):
     exit(0)
 
 
-def check_error(header, target, addr):
+def check_error(header, target, psocket, addr):
     if header != target:
-        closed_by_peer(addr)
+        closed_by_peer(psocket, addr)
 
 
 def update_flist(psocket, addr, body):
     if not body:
         return
-    modbody = tuple(body)
+    modbody = eval(body)
     filename = modbody[0]
     filesize = modbody[1]
     if filename in fileList:
-        fileList[filename] = (addr[0], addr[1])
+        fileList[filename]["peers"].append((addr[0], addr[1]))
     else:
         fileList[filename] = {"size": filesize, "peers": [(addr[0], addr[1])]}
     send_yes()
 
 
-def del_flist(addr, body=None, all=False):
+def del_flist(psocket, addr, body=None, all=False):
     if all == True:
         for filename in fileList:
             try:
@@ -96,17 +96,21 @@ def del_flist(addr, body=None, all=False):
                 del fileList[filename]
     else:
         if not body:
+            send_no(psocket, addr)
             return
         modbody = tuple(body)
         filename = modbody[0]
         if filename not in fileList:
+            send_no(psocket, addr)
             return
         try:
             fileList[filename]["peers"].remove(addr)
         except:
-            pass
+            send_no(psocket, addr)
+            return
         if len(fileList[filename]["peers"]) == 0:
             del fileList[filename]
+        send_yes(psocket, addr)
 
 
 def ret_flist(psocket, addr, body):
@@ -119,7 +123,7 @@ def ret_flist(psocket, addr, body):
         try:
             psocket.send(header + sbody)
         except:
-            closed_by_peer(addr)
+            closed_by_peer(psocket, addr)
     else:
         send_no(psocket, addr)
 
@@ -130,14 +134,14 @@ def ret_plist(psocket, addr):
     try:
         psocket.send(header + sbody)
     except:
-        closed_by_peer(addr)
+        closed_by_peer(psocket, addr)
 
 
 def shutdown(psocket, addr):
     send_yes(psocket)
     psocket.close()
     logger(f"{addr[0]}:{addr[1]} closed, program shutdown.", 'Fatal')
-    del_flist(addr, all=True)
+    del_flist(psocket, addr, all=True)
     try:
         with plock:
             peerList["peers"].remove(addr)
@@ -148,11 +152,11 @@ def shutdown(psocket, addr):
     exit(0)
 
 
-def closed_by_peer(addr):
+def closed_by_peer(psocket, addr):
     log = f"Connection from {addr[0]}:{addr[1]} closed by peer."
     print(log)
     logger(log, 'Error')
-    del_flist(addr, all=True)
+    del_flist(psocket, addr, all=True)
     try:
         with plock:
             peerList["peers"].remove(addr)
@@ -166,7 +170,7 @@ def tcp_connect(psocket, addr):
         try:
             package = recv_data(psocket)
         except:
-            closed_by_peer(addr)
+            closed_by_peer(psocket, addr)
         header = package[0]
         if header[0] == b'S':
             shutdown(psocket, addr)
@@ -179,7 +183,7 @@ def tcp_connect(psocket, addr):
                 update_flist(psocket, addr, package[1])
         elif header[0] == b'X':
             with flock:
-                del_flist(addr, package[1])
+                del_flist(psocket, addr, package[1])
         elif header[0] == b'G':
             ret_flist(psocket, addr, package[1])
         elif header[0] == b'P':
@@ -193,8 +197,8 @@ def tcp_accept():
         try:
             newSocket, addr = serverSocket.accept()
         except OSError:
-            for j in sthread_list:
-                j.join()
+            #for j in sthread_list:
+            #    j.join()
             exit(0)
         t = threading.Thread(target=tcp_connect, args=(newSocket, addr))
         t.setDaemon(True)

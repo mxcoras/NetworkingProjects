@@ -62,8 +62,8 @@ def start_chat():
         toip = inet_ntoa(struct.pack('I', htonl(recvHeader[0])))
         toport = recvHeader[1]
         sendHeader = struct.pack("!II", fromip, fromAddr[1])
-        print(toip, toport)
-        print(fromAddr[0], fromAddr[1])
+        #print(toip, toport)
+        #print(fromAddr[0], fromAddr[1])
         chatSocket.sendto(sendHeader + recvBody, (toip, toport))
 
 

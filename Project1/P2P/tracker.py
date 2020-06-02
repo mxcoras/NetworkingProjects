@@ -48,19 +48,24 @@ def recv_data(psocket) -> tuple:
     return (header, body)
 
 
-def peer_on(psocket, addr):
-    send_yes(psocket)
+def peer_on(psocket, addr, chatport):
+    send_yes(psocket, addr)
     with plock:
-        peerList["peers"].append(addr)
+        peerList["peers"].append((addr[0], int(chatport)))
     logger(f"Connection from {addr[0]}:{addr[1]}.")
 
 
 def peer_off(psocket, addr):
-    send_yes(psocket)
+    send_yes(psocket, addr)
     psocket.close()
     try:
         with plock:
-            peerList["peers"].remove(addr)
+            plist = peerList["peers"]
+            for i in range(len(plist)):
+                if plist[i][0] == addr[0]:
+                    del plist[i]
+            #peerList["peers"].remove(addr)
+            del_flist(psocket, addr, all=True)
     except:
         pass
     logger(f"Connection from {addr[0]}:{addr[1]} closed.")
@@ -78,38 +83,49 @@ def update_flist(psocket, addr, body):
     modbody = eval(body)
     filename = modbody[0]
     filesize = modbody[1]
-    if filename in fileList:
-        fileList[filename]["peers"].append((addr[0], addr[1]))
-    else:
-        fileList[filename] = {"size": filesize, "peers": [(addr[0], addr[1])]}
-    send_yes()
+    seedport = modbody[2]
+    with flock:
+        if filename in fileList:
+            fileList[filename]["peers"].append((addr[0], seedport))
+        else:
+            fileList[filename] = {"size": filesize, "peers": [(addr[0], seedport)]}
+    send_yes(psocket, addr)
 
 
 def del_flist(psocket, addr, body=None, all=False):
     if all == True:
-        for filename in fileList:
+        for filename in list(fileList.keys()):
             try:
-                fileList[filename]["peers"].remove(addr)
+                with flock:
+                    plist = fileList[filename]["peers"]
+                    for i in range(len(plist)):
+                        if plist[i][0] == addr[0]:
+                            del plist[i]
             except:
                 pass
             if len(fileList[filename]["peers"]) == 0:
-                del fileList[filename]
+                with flock:
+                    del fileList[filename]
     else:
         if not body:
             send_no(psocket, addr)
             return
-        modbody = tuple(body)
-        filename = modbody[0]
+        filename = body
         if filename not in fileList:
             send_no(psocket, addr)
             return
         try:
-            fileList[filename]["peers"].remove(addr)
+            with flock:
+                plist = fileList[filename]["peers"]
+                for i in range(len(plist)):
+                    if plist[i][0] == addr[0]:
+                        del plist[i]
         except:
             send_no(psocket, addr)
             return
         if len(fileList[filename]["peers"]) == 0:
-            del fileList[filename]
+            with flock:
+                del fileList[filename]
         send_yes(psocket, addr)
 
 
@@ -117,9 +133,9 @@ def ret_flist(psocket, addr, body):
     if not body:
         send_no(psocket, addr)
         return
-    if fileList.get(body, default=None) != None:
+    if fileList.get(body, None) != None:
         sbody = json.dumps(fileList[body]).encode()
-        header = struct.pack(struct.pack("!cI", b'F', len(sbody)))
+        header = struct.pack("!cI", b'F', len(sbody)+5)
         try:
             psocket.send(header + sbody)
         except:
@@ -130,7 +146,7 @@ def ret_flist(psocket, addr, body):
 
 def ret_plist(psocket, addr):
     sbody = json.dumps(peerList).encode()
-    header = struct.pack(struct.pack("!cI", b'P', len(sbody)))
+    header = struct.pack("!cI", b'P', len(sbody)+5)
     try:
         psocket.send(header + sbody)
     except:
@@ -138,13 +154,17 @@ def ret_plist(psocket, addr):
 
 
 def shutdown(psocket, addr):
-    send_yes(psocket)
+    send_yes(psocket, addr)
     psocket.close()
     logger(f"{addr[0]}:{addr[1]} closed, program shutdown.", 'Fatal')
     del_flist(psocket, addr, all=True)
     try:
         with plock:
-            peerList["peers"].remove(addr)
+            plist = peerList["peers"]
+            for i in range(len(plist)):
+                if plist[i][0] == addr[0]:
+                    del plist[i]
+            #peerList["peers"].remove(addr)
     except:
         pass
     global serverSocket
@@ -154,12 +174,16 @@ def shutdown(psocket, addr):
 
 def closed_by_peer(psocket, addr):
     log = f"Connection from {addr[0]}:{addr[1]} closed by peer."
-    print(log)
+    #print(log)
     logger(log, 'Error')
     del_flist(psocket, addr, all=True)
     try:
         with plock:
-            peerList["peers"].remove(addr)
+            plist = peerList["peers"]
+            for i in range(len(plist)):
+                if plist[i][0] == addr[0]:
+                    del plist[i]
+            #peerList["peers"].remove(addr)
     except:
         pass
     exit(0)
@@ -175,15 +199,13 @@ def tcp_connect(psocket, addr):
         if header[0] == b'S':
             shutdown(psocket, addr)
         elif header[0] == b'O':
-            peer_on(psocket, addr)
+            peer_on(psocket, addr, package[1])
         elif header[0] == b'F':
             peer_off(psocket, addr)
         elif header[0] == b'D':
-            with flock:
-                update_flist(psocket, addr, package[1])
+            update_flist(psocket, addr, package[1])
         elif header[0] == b'X':
-            with flock:
-                del_flist(psocket, addr, package[1])
+            del_flist(psocket, addr, package[1])
         elif header[0] == b'G':
             ret_flist(psocket, addr, package[1])
         elif header[0] == b'P':

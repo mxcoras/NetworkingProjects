@@ -6,12 +6,16 @@ import threading
 import json
 from random import randint
 
+
+SEED_PORT = 12000
+CHAT_PORT = 12001
+
 clientSocket = socket(AF_INET, SOCK_STREAM)
 clientSocket.settimeout(60)
 seedSocket = socket(AF_INET, SOCK_DGRAM)
-seedSocket.bind(('', 12000))
+seedSocket.bind(('', SEED_PORT))
 chatSocket = socket(AF_INET, SOCK_DGRAM)
-chatSocket.bind(('', 12001))
+chatSocket.bind(('', CHAT_PORT))
 
 
 def recv_data() -> tuple:
@@ -35,7 +39,9 @@ def check_header(header, target=b'Y'):
 def send_on(addr):
     try:
         clientSocket.connect(addr)
-        clientSocket.send(struct.pack("!cI", b'O', 5))
+        body = str(CHAT_PORT).encode()
+        plen = len(body) + 5
+        clientSocket.send(struct.pack("!cI", b'O', plen) + body)
         thr_error(recv_data()[0], b'Y', addr)
     except:
         conn_fail(addr)
@@ -44,10 +50,13 @@ def send_on(addr):
 
 def send_off(addr):
     try:
-        clientSocket.send(struct.pack("!cI", b'F', 5))
+        body = str(CHAT_PORT).encode()
+        plen = len(body) + 5
+        clientSocket.send(struct.pack("!cI", b'F', plen) + body)
         thr_error(recv_data()[0], b'Y', addr)
     except:
         conn_fail(addr)
+    exit(0)
 
 
 def send_ok(addr):
@@ -60,10 +69,13 @@ def send_ok(addr):
 
 def send_shutdown(addr):
     try:
-        clientSocket.send(struct.pack("!cI", b'S', 5))
+        body = str(CHAT_PORT).encode()
+        plen = len(body) + 5
+        clientSocket.send(struct.pack("!cI", b'S', plen) + body)
         thr_error(recv_data()[0], b'Y', addr)
     except:
         conn_fail(addr)
+    exit(0)
 
 
 def update_file(filename, addr):
@@ -74,7 +86,7 @@ def update_file(filename, addr):
         return
     data = f.read()
     filesize = len(data)
-    body = str((filename, filesize)).encode()
+    body = str((filename, filesize, SEED_PORT)).encode()
     bodySize = len(body) + 5
     statCode = b'D'
     package = struct.pack("!cI", statCode, bodySize) + body
@@ -105,8 +117,8 @@ def del_file(filename, addr):
         print("Failed to delete.")
 
 
-def get_finfo(addr):
-    package = struct.pack("!cI", b'G', 5)
+def get_finfo(filename, addr):
+    package = struct.pack("!cI", b'G', 5) + filename.encode()
     try:
         clientSocket.send(package)
         raw = recv_data()
@@ -114,14 +126,73 @@ def get_finfo(addr):
         conn_fail(addr)
     header = raw[0]
     body = raw[1]
-    if check_header(header[0], b'N'):
+    if check_header(header, b'N'):
         print("No such file.")
         return None
     return json.loads(body)
 
 
-def recv_file(finfo:dict):
-    pass
+def recv_file(filename, finfo: dict):
+    peers = finfo.get("peers", [])
+    if len(peers) == 1:
+        recv_from_peers(tuple(peers[0]), filename, 0)
+    elif len(peers) == 2:
+        for i in range(2):
+            t = threading.Thread(target=recv_from_peers,
+                                 args=(peers[i], filename, i+1))
+            t.setDaemon(True)
+            t.start()
+        part1 = open(filename + '.1', 'rb')
+        part2 = open(filename + '.2', 'rb')
+        with open(filename, 'wb') as f:
+            f.write(part1)
+            f.write(part2)
+        part1.close()
+        part2.close()
+
+
+def recv_from_peers(peer, filename, part):
+    leechSocket = socket(AF_INET, SOCK_DGRAM)
+    leechSocket.settimeout(15)
+    body = filename.encode()
+    pLen = len(body) + 9
+    leechSocket.sendto(struct.pack("!cII", b'G', part, pLen) + body, peer)
+    try:
+        package, serverAddr = leechSocket.recvfrom(2048)
+    except:
+        print("[Error]: Leech socket closed.")
+        return
+    header = struct.unpack("!cII", package[:9])
+    if not check_header(header[0], b'S'):
+        print("No such file from peers.")
+        return
+    else:
+        leechSocket.sendto(struct.pack("!cII", b'A', 0, 9), peer)
+    if part != 0:
+        fix = f".{part}"
+        f = open(filename + fix, 'wb')
+    else:
+        f = open(filename, 'wb')
+    i = 1
+    while True:
+        try:
+            package, serverAddr = leechSocket.recvfrom(10240)
+        except:
+            print("[Error]: Leech socket closed.")
+            return
+        header = struct.unpack("!cII", package[:9])
+        body = package[9:]
+        if check_header(header[0], b'I') and header[1] == i:
+            leechSocket.sendto(struct.pack("!cII", b'A', i, 9), peer)
+            f.write(body)
+            i += 1
+            continue
+        elif check_header(header[0], b'T'):
+            f.close()
+            return
+        else:
+            print("[Error]: Leech socket closed by peer.")
+            return
 
 
 def get_peers(addr):
@@ -133,11 +204,11 @@ def get_peers(addr):
         conn_fail(addr)
     header = raw[0]
     body = raw[1]
-    if check_header(header[0], b'N'):
+    if check_header(header, b'N'):
         print("Failed to load peer list.")
         return
     plist = json.loads(body)
-    peers = plist.get("peers", default=[])
+    peers = plist.get("peers", [])
     for peer in peers:
         print(peer)
 
@@ -257,7 +328,7 @@ def conn_close(addr):
 def print_help():
     print("Command list:")
     print("update [filename]\nReport new file to your tracker.")
-    print("delet [filename]\nReport removed file to your tracker.")
+    print("delete [filename]\nReport removed file to your tracker.")
     print("get [filename]\nGet peer list of file.")
     print("getpeer\nGet full peer list and print.")
     print("chat\nStart chatting mode.")
@@ -282,12 +353,12 @@ def __main__():
         command = args[0]
         if command == 'update' and argnum == 1:
             update_file(args[1], addr)
-        elif command == 'delet' and argnum == 1:
+        elif command == 'delete' and argnum == 1:
             del_file(args[1], addr)
         elif command == 'get' and argnum == 1:
-            finfo = get_finfo(addr)
+            finfo = get_finfo(args[1], addr)
             if finfo != None:
-                recv_file(finfo)
+                recv_file(args[1], finfo)
         elif command == 'getpeer':
             get_peers(addr)
         elif command == 'chat':

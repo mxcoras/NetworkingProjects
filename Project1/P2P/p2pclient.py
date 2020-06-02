@@ -5,6 +5,7 @@ import struct
 import threading
 import json
 from random import randint
+from os import remove
 
 
 SEED_PORT = 12000
@@ -16,6 +17,9 @@ seedSocket = socket(AF_INET, SOCK_DGRAM)
 seedSocket.bind(('', SEED_PORT))
 chatSocket = socket(AF_INET, SOCK_DGRAM)
 chatSocket.bind(('', CHAT_PORT))
+
+
+thread_list = []
 
 
 def recv_data() -> tuple:
@@ -138,17 +142,22 @@ def recv_file(filename, finfo: dict):
         recv_from_peers(tuple(peers[0]), filename, 0)
     elif len(peers) == 2:
         for i in range(2):
-            t = threading.Thread(target=recv_from_peers,
-                                 args=(peers[i], filename, i+1))
+            t = threading.Thread(target=recv_from_peers, args=(tuple(peers[i]), filename, i+1))
             t.setDaemon(True)
             t.start()
+            thread_list.append(t)
+        for j in thread_list:
+            j.join()
         part1 = open(filename + '.1', 'rb')
         part2 = open(filename + '.2', 'rb')
         with open(filename, 'wb') as f:
-            f.write(part1)
-            f.write(part2)
+            f.write(part1.read())
+            f.write(part2.read())
         part1.close()
+        remove(filename + '.1')
         part2.close()
+        remove(filename + '.2')
+    print(f"Successful download {filename}")
 
 
 def recv_from_peers(peer, filename, part):
@@ -160,11 +169,11 @@ def recv_from_peers(peer, filename, part):
     try:
         package, serverAddr = leechSocket.recvfrom(2048)
     except:
-        print("[Error]: Leech socket closed.")
+        print("[Error]: Leech socket closed.\n>$ ", end='')
         return
     header = struct.unpack("!cII", package[:9])
     if not check_header(header[0], b'S'):
-        print("No such file from peers.")
+        print("No such file from peers.\n>$ ", end='')
         return
     else:
         leechSocket.sendto(struct.pack("!cII", b'A', 0, 9), peer)
@@ -178,7 +187,7 @@ def recv_from_peers(peer, filename, part):
         try:
             package, serverAddr = leechSocket.recvfrom(10240)
         except:
-            print("[Error]: Leech socket closed.")
+            print("[Error]: Leech socket closed.\n>$ ", end='')
             return
         header = struct.unpack("!cII", package[:9])
         body = package[9:]
@@ -189,9 +198,10 @@ def recv_from_peers(peer, filename, part):
             continue
         elif check_header(header[0], b'T'):
             f.close()
+            leechSocket.sendto(struct.pack("!cII", b'A', 0, 9), peer)
             return
         else:
-            print("[Error]: Leech socket closed by peer.")
+            print("[Error]: Leech socket closed by peer.\n>$ ", end='')
             return
 
 
@@ -211,6 +221,7 @@ def get_peers(addr):
     peers = plist.get("peers", [])
     for peer in peers:
         print(peer)
+    print(">$ ", end='')
 
 
 def start_seed():
@@ -220,9 +231,10 @@ def start_seed():
             header = struct.unpack("!cII", package[:9])
             if check_header(header[0], b'G'):
                 body = package[9:].decode()
+                print(f"{peerAddr} in.\n$> ", end='')
                 send_file(peerAddr, body, header[1])
         except:
-            print("[Warning]: Seed socket closed.")
+            print("[Warning]: Seed socket closed.\n>$ ", end='')
             return
 
 
@@ -256,14 +268,23 @@ def send_file(peerAddr, filename, part):
             body = sf.read(10231)
             if not body:
                 seedSocket.sendto(struct.pack("!cII", b'T', 0, 9), peerAddr)
+                print(f"Send {filename} to {peerAddr} complete.\n>$ ", end='')
                 if not recv_ack(peerAddr, 0):
                     print("[Warnig] Complete ACK not recieved.")
-                    return
+                sf.close()
+                remove('TEMP.'+str(fix))
+                return
             bodySize = len(body) + 9
             package = struct.pack("!cII", b'I', packnum, bodySize) + body
             seedSocket.sendto(package, peerAddr)
             if not recv_ack(peerAddr, packnum):
+                print("OOS")
+                sf.close()
+                remove('TEMP.'+str(fix))
                 return
+            packnum += 1
+    sf.close()
+    remove('TEMP.'+str(fix))
 
 
 def recv_ack(peerAddr, num):
@@ -327,13 +348,13 @@ def conn_close(addr):
 
 def print_help():
     print("Command list:")
-    print("update [filename]\nReport new file to your tracker.")
-    print("delete [filename]\nReport removed file to your tracker.")
-    print("get [filename]\nGet peer list of file.")
-    print("getpeer\nGet full peer list and print.")
-    print("chat\nStart chatting mode.")
-    print("close\nClose connection.")
-    print("shutdown\nClose connection and shutdown tracker.")
+    print("$> update [filename]\n -Report new file to your tracker.")
+    print("$> delete [filename]\n -Report removed file to your tracker.")
+    print("$> get [filename]\n -Get peer list of file.")
+    print("$> getpeer\n -Get full peer list and print.")
+    print("$> chat\n -Start chatting mode.")
+    print("$> close\n -Close connection.")
+    print("$> shutdown\n -Close connection and shutdown tracker.")
 
 
 def __main__():

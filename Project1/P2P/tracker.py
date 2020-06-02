@@ -64,10 +64,13 @@ def peer_off(psocket, addr):
             for i in range(len(plist)):
                 if plist[i][0] == addr[0]:
                     del plist[i]
+                    log = f"Delete peerinfo of {addr}."
+                    logger(log)
             #peerList["peers"].remove(addr)
             del_flist(psocket, addr, all=True)
     except:
-        pass
+        log = f"Delete peerinfo of {addr} failed."
+        logger(log, level='Error')
     logger(f"Connection from {addr[0]}:{addr[1]} closed.")
     exit(0)
 
@@ -89,6 +92,8 @@ def update_flist(psocket, addr, body):
             fileList[filename]["peers"].append((addr[0], seedport))
         else:
             fileList[filename] = {"size": filesize, "peers": [(addr[0], seedport)]}
+    log = f"Update fileinfo of '{filename}', from {addr}."
+    logger(log)
     send_yes(psocket, addr)
 
 
@@ -102,7 +107,8 @@ def del_flist(psocket, addr, body=None, all=False):
                         if plist[i][0] == addr[0]:
                             del plist[i]
             except:
-                pass
+                log = f"Delete fileinfo of {addr} failed."
+                logger(log, level='Error')
             if len(fileList[filename]["peers"]) == 0:
                 with flock:
                     del fileList[filename]
@@ -122,10 +128,14 @@ def del_flist(psocket, addr, body=None, all=False):
                         del plist[i]
         except:
             send_no(psocket, addr)
+            log = f"Delete fileinfo of {addr} failed."
+            logger(log, level='Error')
             return
         if len(fileList[filename]["peers"]) == 0:
             with flock:
                 del fileList[filename]
+        log = f"Delete fileinfo of '{filename}', from {addr}."
+        logger(log)
         send_yes(psocket, addr)
 
 
@@ -156,7 +166,7 @@ def ret_plist(psocket, addr):
 def shutdown(psocket, addr):
     send_yes(psocket, addr)
     psocket.close()
-    logger(f"{addr[0]}:{addr[1]} closed, program shutdown.", 'Fatal')
+    logger(f"{addr[0]}:{addr[1]} closed, program shutdown.", 'Warning')
     del_flist(psocket, addr, all=True)
     try:
         with plock:
@@ -237,6 +247,7 @@ Type 'exitnow' to exit."
         print(hint)
         raw = input('$> ')
         args = raw.split(' ')
+        argnum = len(args) - 1
         command = args[0]
         arg = 0 if len(args) == 1 else int(args[1])
         if command == 'cat':
@@ -250,11 +261,16 @@ Type 'exitnow' to exit."
             elif arg == 0:
                 for item in logs:
                     print(item)
+                print(' ')
             else:
                 print("Command error.")
+        elif command == 'flist':
+            print(fileList)
+        elif command == 'plist':
+            print(peerList)
         elif command == 'exitnow':
             exitstr = "Shutdown by user."
-            logger(exitstr, 'Fatal')
+            logger(exitstr, 'Info')
             with open("server.log", 'a', encoding='utf-8') as f:
                 for line in logs:
                     f.write(line + '\n')

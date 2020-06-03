@@ -270,7 +270,7 @@ def send_file(peerAddr, filename, part):
                 seedSocket.sendto(struct.pack("!cII", b'T', 0, 9), peerAddr)
                 print(f"Send {filename} to {peerAddr} complete.\n>$ ", end='')
                 if not recv_ack(peerAddr, 0):
-                    print("[Warnig] Complete ACK not recieved.")
+                    print("[Warning] Complete ACK not recieved.")
                 sf.close()
                 remove('TEMP.'+str(fix))
                 return

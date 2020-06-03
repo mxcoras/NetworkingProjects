@@ -1,5 +1,5 @@
 # P2P
-[TOF]
+[TOC]
 ## 概况
 - P2P程序设计中，分为**Tracker**、**Client**两大部分。
 - p2pclient.py运行在客户端上，使用时连接Tracker服务器，进行文件下载
